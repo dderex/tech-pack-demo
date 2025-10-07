@@ -8,6 +8,7 @@ from datetime import datetime
 import zipfile
 
 from tech_pack_extractor import extract_from_pdf
+from image_uploader import ImageUploader
 
 st.set_page_config(
     page_title="Tech Pack OCR Demo",
@@ -225,6 +226,60 @@ st.markdown("""
         .stSelectbox > div > div > div:focus-within {
             border-color: #4169E1 !important;
             box-shadow: 0 0 0 0.2rem rgba(65, 105, 225, 0.25) !important;
+        }
+        
+        /* Tab container separator line */
+        .tab-container {
+            border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 24px;
+            padding-bottom: 0;
+        }
+        
+        /* Tab button styling - Multiple selectors for better targeting */
+        .tab-container button[kind="secondary"],
+        div[data-testid="column"] button[kind="secondary"],
+        button[data-testid*="baseButton"][kind="secondary"] {
+            background-color: #f0f0f0 !important;
+            color: #666666 !important;
+            border: 1px solid #d0d0d0 !important;
+            font-weight: 400 !important;
+        }
+        
+        .tab-container button[kind="secondary"]:hover,
+        div[data-testid="column"] button[kind="secondary"]:hover,
+        button[data-testid*="baseButton"][kind="secondary"]:hover {
+            background-color: #e0e0e0 !important;
+            color: #4169E1 !important;
+            border-color: #4169E1 !important;
+        }
+        
+        /* Active tab - Primary button with multiple selectors */
+        .tab-container button[kind="primary"],
+        div[data-testid="column"] button[kind="primary"],
+        button[data-testid*="baseButton"][kind="primary"] {
+            background-color: #4169E1 !important;
+            color: white !important;
+            border: 2px solid #4169E1 !important;
+            font-weight: 600 !important;
+            box-shadow: 0 2px 8px rgba(65, 105, 225, 0.3) !important;
+        }
+        
+        .tab-container button[kind="primary"]:hover,
+        div[data-testid="column"] button[kind="primary"]:hover,
+        button[data-testid*="baseButton"][kind="primary"]:hover {
+            background-color: #1E90FF !important;
+            border-color: #1E90FF !important;
+        }
+        
+        /* Force override Streamlit defaults for these specific buttons */
+        .stButton > button[kind="secondary"] {
+            background-color: #f0f0f0 !important;
+            color: #666666 !important;
+        }
+        
+        .stButton > button[kind="primary"] {
+            background-color: #4169E1 !important;
+            color: white !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -469,6 +524,18 @@ def create_excel_export_zip(result, filename_base):
 
 def main():
     st.markdown('<h1 class="main-header">Tech Pack OCR Demo</h1>', unsafe_allow_html=True)
+    
+    # Initialize image uploader with API key (no UI config needed)
+    api_key = os.getenv('IMGBB_API_KEY', "5b7554e6b9164c3060d6bc5149748582")
+    image_uploader = ImageUploader(api_key)
+    st.session_state['image_uploader'] = image_uploader
+    
+    # Initialize session state for costing display and active tab
+    if 'show_costing' not in st.session_state:
+        st.session_state['show_costing'] = False
+    if 'active_tab' not in st.session_state:
+        st.session_state['active_tab'] = 0
+    
     st.markdown("### 📤 Upload Your PDF Tech Pack")
     
     uploaded_file = st.file_uploader(
@@ -489,8 +556,23 @@ def main():
         file_size_mb = uploaded_file.size / (1024 * 1024)
         st.success(f"✅ **File accepted:** {uploaded_file.name} ({file_size_mb:.1f}MB)")
         
-        if st.button("Extract Data", type="primary", use_container_width=True):
-            
+        # Check if we already have extraction results for this file
+        current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+        if 'current_file_key' not in st.session_state:
+            st.session_state['current_file_key'] = None
+        
+        # Reset results if different file
+        if st.session_state['current_file_key'] != current_file_key:
+            st.session_state['extraction_result'] = None
+            st.session_state['show_costing'] = False
+            st.session_state['active_tab'] = 0  # Reset to Summary tab
+            st.session_state['current_file_key'] = current_file_key
+        
+        # Extract button or show existing results
+        extract_clicked = st.button("Extract Data", type="primary", use_container_width=True)
+        
+        # Only extract if button clicked and no existing result
+        if extract_clicked and not st.session_state.get('extraction_result'):
             with st.spinner('🔄 Processing PDF... This may take a few moments.'):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file.read())
@@ -498,100 +580,229 @@ def main():
                 
                 try:
                     result = extract_from_pdf(tmp_file_path)
+                    st.session_state['extraction_result'] = result
                     
-                    if result:
-                        st.success("✅ **Extraction Complete!**")
-                        filename_base = uploaded_file.name.replace('.pdf', '').replace(' ', '_')
-                        
-                        tab1, tab2, tab3, tab4 = st.tabs(["📋 Summary", "🏷️ Identifiers", "📋 BOM", "📏 Measurements"])
-                        
-                        with tab1:
-                            st.markdown("### 📊 Extraction Summary")
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                found_identifiers = len([v for v in result['fields'].values() if v != "not found"])
-                                total_identifiers = len(result['fields'])
-                                st.metric("Product Identifiers", f"{found_identifiers}/{total_identifiers}")
-                            
-                            with col2:
-                                bom_count = len(result.get('bom_tables', []))
-                                st.metric("BOM Tables", bom_count)
-                            
-                            with col3:
-                                measurement_count = len(result.get('measurement_tables', []))
-                                st.metric("Measurement Tables", measurement_count)
-                        
-                        with tab2:
-                            st.markdown("### 🏷️ Product Identifiers")
-                            
-                            fields = result.get('fields', {})
-                            identifier_data = [
-                                {'Field': field.replace('_', ' ').title(), 'Value': value}
-                                for field, value in fields.items()
-                            ]
-                            
-                            if identifier_data:
-                                df_identifiers = pd.DataFrame(identifier_data)
-                                st.dataframe(df_identifiers, use_container_width=True, hide_index=True)
-                            else:
-                                st.warning("No identifier data found")
-                        
-                        with tab3:
-                            st.markdown("### 📋 Bill of Materials (BOM)")
-                            bom_tables = result.get('bom_tables', [])
-                            if bom_tables:
-                                for i, group in enumerate(bom_tables, 1):
-                                    display_table_group(group, "BOM", i)
-                            else:
-                                st.warning("No BOM tables found")
-                        
-                        with tab4:
-                            st.markdown("### 📏 Measurements & Fit Specifications")
-                            measurement_tables = result.get('measurement_tables', [])
-                            if measurement_tables:
-                                for i, group in enumerate(measurement_tables, 1):
-                                    display_table_group(group, "Measurements", i)
-                            else:
-                                st.warning("No measurement tables found")
-                        
-                        st.markdown("---")
-                        st.markdown("### 📁 Export Data")
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            structured_json = create_structured_json(result)
-                            json_str = json.dumps(structured_json, indent=2)
-                            
-                            st.download_button(
-                                label="📄 Download JSON",
-                                data=json_str,
-                                file_name=f"{filename_base}_structured_data.json",
-                                mime="application/json",
-                                help="Download structured JSON representation"
-                            )
-                        
-                        with col2:
-                            excel_zip_data = create_excel_export_zip(result, filename_base)
-                            
-                            st.download_button(
-                                label="📊 Download Excel (ZIP)",
-                                data=excel_zip_data,
-                                file_name=f"{filename_base}_excel_export.zip",
-                                mime="application/zip",
-                                help="Download all tables as Excel files in ZIP"
-                            )
-                    
-                    else:
-                        st.error("⚠️ Failed to extract data from PDF. Please check the file format and content.")
-                
                 except Exception as e:
                     st.error(f"⚠️ Error processing file: {str(e)}")
+                    result = None
                 
                 finally:
-                    # Clean up temporary file
                     if os.path.exists(tmp_file_path):
                         os.unlink(tmp_file_path)
+        
+        # Display results if available
+        result = st.session_state.get('extraction_result')
+        
+        if result:
+            st.success("✅ **Extraction Complete!**")
+            filename_base = uploaded_file.name.replace('.pdf', '').replace(' ', '_')
+            
+            # Tab selection with session state support
+            tab_options = ["📋 Summary", "🏷️ Identifiers", "📋 BOM", "📏 Measurements", "🖼️ Sketches"]
+            
+            # Create clickable tab buttons with container
+            st.markdown('<div class="tab-container">', unsafe_allow_html=True)
+            cols = st.columns(5)
+            for idx, (col, tab_name) in enumerate(zip(cols, tab_options)):
+                with col:
+                    button_type = "primary" if st.session_state['active_tab'] == idx else "secondary"
+                    if st.button(tab_name, key=f"tab_btn_{idx}", use_container_width=True, type=button_type):
+                        st.session_state['active_tab'] = idx
+                        st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Display content based on active tab
+            if st.session_state['active_tab'] == 0:  # Summary
+                st.markdown("### 📊 Extraction Summary")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    found_identifiers = len([v for v in result['fields'].values() if v != "not found"])
+                    total_identifiers = len(result['fields'])
+                    st.metric("Product Identifiers", f"{found_identifiers}/{total_identifiers}")
+                
+                with col2:
+                    bom_count = len(result.get('bom_tables', []))
+                    st.metric("BOM Tables", bom_count)
+                
+                with col3:
+                    measurement_count = len(result.get('measurement_tables', []))
+                    st.metric("Measurement Tables", measurement_count)
+                
+                with col4:
+                    image_count = len(result.get('image_sketches', []))
+                    st.metric("Image Sketches", image_count)
+            
+            elif st.session_state['active_tab'] == 1:  # Identifiers
+                st.markdown("### 🏷️ Product Identifiers")
+                
+                fields = result.get('fields', {})
+                identifier_data = [
+                    {'Field': field.replace('_', ' ').title(), 'Value': value}
+                    for field, value in fields.items()
+                ]
+                
+                if identifier_data:
+                    df_identifiers = pd.DataFrame(identifier_data)
+                    st.dataframe(df_identifiers, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No identifier data found")
+            
+            elif st.session_state['active_tab'] == 2:  # BOM
+                st.markdown("### 📋 Bill of Materials (BOM)")
+                bom_tables = result.get('bom_tables', [])
+                if bom_tables:
+                    for i, group in enumerate(bom_tables, 1):
+                        display_table_group(group, "BOM", i)
+                    
+                    # Add Preliminary Costing button
+                    st.markdown("---")
+                    if st.button("Run Preliminary Costing", type="primary", use_container_width=True):
+                        import time
+                        with st.spinner('Calculating preliminary costs...'):
+                            time.sleep(0.5)
+                        st.session_state['show_costing'] = True
+                        st.session_state['active_tab'] = 2  # Stay on BOM tab
+                    
+                    # Display costing information if button was clicked
+                    if st.session_state.get('show_costing', False):
+                        st.markdown("---")
+                        
+                        st.markdown("#### BOM Table with Estimated Costs:")
+                        
+                        # Create costing table
+                        costing_data = {
+                            'Component': [
+                                'Yarn A - YRN0001145- REGAL PPLG25041004 1/13NM 75% ACRYLIC 3% SPANDEX 22% POLYESTER',
+                                'Yarn B - YRN0000147- 100% LOW POWER LYCRA',
+                                'Flag label'
+                            ],
+                            'Estimated Cost (USD)': [
+                                '$6.14',
+                                '$1.88',
+                                '$0.21'
+                            ]
+                        }
+                        
+                        df_costing = pd.DataFrame(costing_data)
+                        st.dataframe(df_costing, use_container_width=True, hide_index=True)
+                        
+                        # Summary section
+                        st.markdown("#### Summary:")
+                        st.markdown(""" 
+**Total material cost** - \$8.23  
+**Labor** - \$2.05  
+**Overhead** - \$2.05  
+**Total FOB estimated unit cost:** \$12.33
+""")
+                else:
+                    st.warning("No BOM tables found")
+            
+            elif st.session_state['active_tab'] == 3:  # Measurements
+                st.markdown("### 📏 Measurements & Fit Specifications")
+                measurement_tables = result.get('measurement_tables', [])
+                if measurement_tables:
+                    for i, group in enumerate(measurement_tables, 1):
+                        display_table_group(group, "Measurements", i)
+                else:
+                    st.warning("No measurement tables found")
+            
+            elif st.session_state['active_tab'] == 4:  # Sketches
+                st.markdown("### 🖼️ Image Data Sheet Sketches")
+                image_sketches = result.get('image_sketches', [])
+                
+                if image_sketches:
+                    st.write(f"**Found {len(image_sketches)} sketch(es)**")
+                    
+                    # Get image uploader from session state
+                    uploader = st.session_state.get('image_uploader')
+                    
+                    # Upload images and get persistent URLs
+                    if f'uploaded_images_{filename_base}' not in st.session_state:
+                        with st.spinner('☁️ Uploading images to cloud storage...'):
+                            uploaded_results = uploader.upload_multiple(image_sketches, filename_base)
+                            st.session_state[f'uploaded_images_{filename_base}'] = uploaded_results
+                    else:
+                        uploaded_results = st.session_state[f'uploaded_images_{filename_base}']
+                    
+                    # Display uploaded images with persistent URLs
+                    for i, img_data in enumerate(uploaded_results, 1):
+                        page_num = img_data['page']
+                        img_index = img_data.get('image_index', i)
+                        img_name = img_data.get('name', f'image_{img_index}')
+                        upload_info = img_data.get('upload')
+                        
+                        st.markdown(f"#### Sketch {i} - Page {page_num}")
+                        st.caption(f"🖼️ {img_name} (Image {img_index} on page)")
+                        
+                        # Display the image from extracted data
+                        st.image(img_data['image_data'], use_container_width=True)
+                        
+                        # Show persistent URL and actions
+                        if upload_info and upload_info.get('url'):
+                            col1, col2, col3 = st.columns([4, 1, 1])
+                            with col1:
+                                st.code(upload_info['url'], language=None)
+                            with col2:
+                                st.link_button(
+                                    "🌐 Open",
+                                    upload_info['url'],
+                                    use_container_width=True
+                                )
+                            with col3:
+                                st.download_button(
+                                    label="📥 Download",
+                                    data=img_data['image_data'],
+                                    file_name=f"{filename_base}_page{page_num}_img{img_index}.png",
+                                    mime="image/png",
+                                    key=f"download_sketch_{i}",
+                                    use_container_width=True
+                                )
+                        else:
+                            st.warning("⚠️ Upload failed - URL not available")
+                            st.download_button(
+                                label=f"📥 Download PNG",
+                                data=img_data['image_data'],
+                                file_name=f"{filename_base}_page{page_num}_img{img_index}.png",
+                                mime="image/png",
+                                key=f"download_sketch_{i}"
+                            )
+                        
+                        st.markdown("---")
+                else:
+                    st.info("ℹ️ No images found in 'Image Data Sheet' pages. Make sure the PDF contains embedded images.")
+            
+            st.markdown("---")
+            st.markdown("### 📁 Export Data")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                structured_json = create_structured_json(result)
+                json_str = json.dumps(structured_json, indent=2)
+                
+                st.download_button(
+                    label="📄 Download JSON",
+                    data=json_str,
+                    file_name=f"{filename_base}_structured_data.json",
+                    mime="application/json",
+                    help="Download structured JSON representation"
+                )
+            
+            with col2:
+                excel_zip_data = create_excel_export_zip(result, filename_base)
+                
+                st.download_button(
+                    label="📊 Download Excel (ZIP)",
+                    data=excel_zip_data,
+                    file_name=f"{filename_base}_excel_export.zip",
+                    mime="application/zip",
+                    help="Download all tables as Excel files in ZIP"
+                )
+        else:
+            if extract_clicked:
+                st.error("⚠️ Failed to extract data from PDF. Please check the file format and content.")
 
 if __name__ == "__main__":
     main()

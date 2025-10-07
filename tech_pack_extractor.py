@@ -360,6 +360,63 @@ def _is_valid_designer_name(name: str) -> bool:
     return True
 
 
+def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> List[Dict]:
+    """Extract embedded images from a PDF page."""
+    extracted_images = []
+    
+    try:
+        # Extract embedded images from the page
+        if hasattr(page, 'images') and page.images:
+            if verbose:
+                print(f"   🖼️ Found {len(page.images)} embedded image(s) on page {page_num}")
+            
+            for img_idx, img_info in enumerate(page.images):
+                try:
+                    # Get image object name
+                    img_name = img_info.get('name', f'image_{img_idx+1}')
+                    
+                    # Create bounding box from image info
+                    bbox = (
+                        img_info['x0'],
+                        img_info['top'],
+                        img_info['x0'] + img_info['width'],
+                        img_info['top'] + img_info['height']
+                    )
+                    
+                    # Crop and extract the image at high resolution
+                    cropped_img = page.within_bbox(bbox).to_image(resolution=300)
+                    
+                    # Convert to bytes with high quality
+                    import io
+                    img_byte_arr = io.BytesIO()
+                    cropped_img.original.save(img_byte_arr, format='PNG', optimize=False, compress_level=1)
+                    img_byte_arr.seek(0)
+                    
+                    extracted_images.append({
+                        'page': page_num,
+                        'image_index': img_idx + 1,
+                        'image_data': img_byte_arr.getvalue(),
+                        'format': 'PNG',
+                        'name': img_name
+                    })
+                    
+                    if verbose:
+                        print(f"     ✓ Extracted image {img_idx + 1}: {img_name} (300 DPI)")
+                
+                except Exception as e:
+                    if verbose:
+                        print(f"     ✗ Could not extract image {img_idx + 1}: {e}")
+        else:
+            if verbose:
+                print(f"   ⚠️ No embedded images found on page {page_num}")
+    
+    except Exception as e:
+        if verbose:
+            print(f"   ⚠️ Error processing page {page_num}: {e}")
+    
+    return extracted_images
+
+
 def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
     """Extract product identifiers, BOM tables, and measurements from PDF."""
     if verbose:
@@ -372,14 +429,17 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
             'fields': {},
             'bom_tables': [],
             'measurement_tables': [],
+            'image_sketches': [],
             'text_length': 0,
             'first_page_length': 0
         }
         
         bom_tables = []
         measurement_tables = []
+        image_sketches = []
         bom_keywords = ['bom', 'bill of materials']
         measurement_keywords = ['measurement', 'fit specifications', 'size specifications', 'points of measure']
+        image_keyword = 'image data sheet'
         
         with pdfplumber.open(pdf_path) as pdf:
             if verbose:
@@ -398,6 +458,12 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
                     result['first_page_text'] = text
                     if verbose:
                         print(f"   📋 Page 1: Captured for identifier extraction and table detection")
+                
+                # Extract images from "Image Data Sheet" pages
+                if image_keyword in text_lower:
+                    page_images = _extract_images_from_page(page, page_num, verbose)
+                    if page_images:
+                        image_sketches.extend(page_images)
                 
                 is_bom_page = any(keyword in text_lower for keyword in bom_keywords)
                 is_measurement_page = any(keyword in text_lower for keyword in measurement_keywords)
@@ -450,11 +516,12 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
         
         result['bom_tables'] = _merge_similar_tables(bom_tables, "BOM", verbose)
         result['measurement_tables'] = _merge_similar_tables(measurement_tables, "Measurement", verbose)
+        result['image_sketches'] = image_sketches
         result['text_length'] = len(result['full_text'])
         result['first_page_length'] = len(result['first_page_text'])
         
         if verbose:
-            _print_extraction_summary(result, bom_tables, measurement_tables)
+            _print_extraction_summary(result, bom_tables, measurement_tables, image_sketches)
         
         return result
         
@@ -1044,7 +1111,7 @@ def _merge_tables_by_identifier(tables: List[Dict]) -> List[List]:
     return merged_data
 
 
-def _print_extraction_summary(result: Dict, raw_bom_tables: List, raw_measurement_tables: List) -> None:
+def _print_extraction_summary(result: Dict, raw_bom_tables: List, raw_measurement_tables: List, image_sketches: List = None) -> None:
     """Print extraction summary."""
     fields = result['fields']
     found_count = sum(1 for v in fields.values() if v != 'not found')
@@ -1052,11 +1119,13 @@ def _print_extraction_summary(result: Dict, raw_bom_tables: List, raw_measuremen
     # Count pages for BOM
     bom_pages = set(t['page'] for t in raw_bom_tables) if raw_bom_tables else set()
     measurement_pages = set(t['page'] for t in raw_measurement_tables) if raw_measurement_tables else set()
+    image_pages = set(img['page'] for img in image_sketches) if image_sketches else set()
     
     print(f"\n📊 EXTRACTION SUMMARY:")
     print(f"   • Identifiers: {found_count}/6 found from Page 1")
     print(f"   • BOM Tables: {len(raw_bom_tables)} tables from {len(bom_pages)} page(s) {sorted(bom_pages)}" if bom_pages else "   • BOM Tables: None found")
     print(f"   • Measurement Tables: {len(raw_measurement_tables)} tables from {len(measurement_pages)} page(s) {sorted(measurement_pages)}" if measurement_pages else "   • Measurement Tables: None found")
+    print(f"   • Image Sketches: {len(image_sketches)} image(s) from {len(image_pages)} page(s) {sorted(image_pages)}" if image_sketches else "   • Image Sketches: None found")
 
 
 def print_table_to_terminal(table_data, max_rows=10, max_col_width=20):
