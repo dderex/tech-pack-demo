@@ -37,26 +37,26 @@ def extract_value_after_keyword(text, keyword_pos, keyword):
 
 
 def extract_fields_from_text(text: str) -> Dict[str, str]:
-    """Extract product identifier fields from first page text."""
+    """Extract product identifier fields from first two pages text."""
     
     field_patterns = {
-        'style_name': [
-            r'name\s+(.+?)(?:\s*$|\s*-\s*style)',
-            r'product\s*name[:\s]*(.+)',
-            r'style\s*name[:\s]*(.+)',
-            r'description[:\s]*(.+)'
+        'brand': [
+            r'brand[:\s]*(.+)',
+            r'company[:\s]*(.+)',
+            r'manufacturer[:\s]*(.+)'
+        ],
+        'description': [
+            r'description[:\s]*(.+)',
+            r'product\s*description[:\s]*(.+)',
+            r'item\s*description[:\s]*(.+)'
         ],
         'style_number': [
             r'style\s*no\.?\s*([A-Z0-9\-_]+)',
             r'style\s*number[:\s]*([A-Z0-9\-_]+)',
             r'sku[:\s]*([A-Z0-9\-_]+)'
         ],
-        'brand': [
-            r'brand[:\s]*(.+)',
-            r'company[:\s]*(.+)',
-            r'manufacturer[:\s]*(.+)'
-        ],
         'season_year': [
+            r'season[:\s]*([^,\n\r]+?)(?:\s*$|\s*[,;\n\r]|\s*[a-z]{2,})',
             r'season[/\s]*year[:\s]*([^,\n\r]+?)(?:\s*$|\s*[,;\n\r]|\s*[a-z]{2,})',
             r'collection[:\s]*([^,\n\r]+?)(?:\s*$|\s*[,;\n\r]|\s*[a-z]{2,})',
             r'\b(20\d{2})\b',
@@ -64,17 +64,20 @@ def extract_fields_from_text(text: str) -> Dict[str, str]:
             r'\b(spring|summer|fall|autumn|winter)\b(?!\s*(20\d{2}))',
             r'\b(20\d{2})\b(?!\s*(spring|summer|fall|autumn|winter))'
         ],
-        'designer_developer': [
-            r'designer[:\s]*(.+)',
-            r'developer[:\s]*(.+)',
-            r'created\s*by[:\s]*(.+)',
-            r'created\s*by\s*/\s*author[:\s]*(.+)',
-            r'author[:\s]*(.+)'
+        'model_id': [
+            r'model\s*#[:\s]*([A-Z0-9\-_]+)',
+            r'model\s*id[:\s]*([A-Z0-9\-_]+)',
+            r'model\s*number[:\s]*([A-Z0-9\-_]+)'
+        ],
+        'product_line': [
+            r'product\s*line[:\s]*(.+)',
+            r'line[:\s]*(.+)',
+            r'collection[:\s]*(.+)'
         ],
         'date': [
-            r'(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})',
-            r'date[:\s]*(.+)',
-            r'created[:\s]*(.+)'
+            r'date[:\s]*([^,]+)',
+            r'created[:\s]*([^,]+)',
+            r'(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4})'
         ]
     }
     
@@ -86,12 +89,20 @@ def extract_fields_from_text(text: str) -> Dict[str, str]:
         if not line or _is_skip_line(line):
             continue
         
-        if line.startswith('Name ') and 'style_name' not in extracted:
-            extracted['style_name'] = line[5:].strip()
+        if line.startswith('Brand ') and 'brand' not in extracted:
+            extracted['brand'] = line[6:].strip()
+        elif line.startswith('Description ') and 'description' not in extracted:
+            extracted['description'] = line[12:].strip()
         elif line.startswith('Style No. ') and 'style_number' not in extracted:
             extracted['style_number'] = line[10:].strip()
-        elif line.startswith('Brand ') and 'brand' not in extracted:
-            extracted['brand'] = line[6:].strip()
+        elif line.startswith('Season ') and 'season_year' not in extracted:
+            extracted['season_year'] = line[7:].strip()
+        elif line.startswith('Model #') and 'model_id' not in extracted:
+            extracted['model_id'] = line[7:].strip()
+        elif line.startswith('Product Line ') and 'product_line' not in extracted:
+            extracted['product_line'] = line[13:].strip()
+        elif line.startswith('Date ') and 'date' not in extracted:
+            extracted['date'] = line[5:].strip()
     
     for field_name, patterns in field_patterns.items():
         if field_name in extracted:
@@ -106,11 +117,7 @@ def extract_fields_from_text(text: str) -> Dict[str, str]:
                 if match:
                     value = match.group(1).strip() if match.lastindex else match.group(0).strip()
                     
-                    if field_name == 'designer_developer':
-                        if _is_valid_designer_name(value):
-                            extracted[field_name] = value
-                            break
-                    elif _is_valid_value(value):
+                    if _is_valid_value(value):
                         cleaned_value = _clean_value(value, field_name)
                         if cleaned_value is not None:
                             extracted[field_name] = cleaned_value
@@ -118,14 +125,13 @@ def extract_fields_from_text(text: str) -> Dict[str, str]:
             if field_name in extracted:
                 break
     
-    _extract_designer_developer(lines, extracted)
     _extract_date_and_year(lines, extracted)
     _extract_season_year_smart(text, extracted)
     
-    required_fields = ['style_name', 'style_number', 'brand', 'season_year', 'designer_developer', 'date']
+    required_fields = ['brand', 'description', 'style_number', 'season_year', 'composition', 'material_finishes', 'yarn_gauge', 'model_id', 'product_line', 'date']
     for field in required_fields:
         if field not in extracted or not extracted[field]:
-            extracted[field] = 'not found'
+            extracted[field] = ''
     
     return extracted
 
@@ -162,13 +168,15 @@ def _clean_value(value: str, field_type: str) -> str:
     value = value.strip()
     value = re.sub(r'^["\'\[\(]+|["\'\]\)]+$', '', value)
     
-    if field_type == 'style_name' and len(value) > 60:
+    if field_type == 'description' and len(value) > 100:
         return None
     
     if field_type == 'date':
-        date_match = re.search(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', value)
-        return date_match.group(0) if date_match else value
-    elif field_type == 'style_number':
+        # Extract only the part before comma
+        date_part = value.split(',')[0].strip()
+        date_match = re.search(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', date_part)
+        return date_match.group(0) if date_match else date_part
+    elif field_type in ['style_number', 'model_id']:
         code_match = re.search(r'[A-Z0-9\-_]{3,}', value.upper())
         return code_match.group(0) if code_match else value
     elif field_type == 'season_year':
@@ -176,30 +184,6 @@ def _clean_value(value: str, field_type: str) -> str:
         return year_match.group(0) if year_match else value
     
     return value
-
-
-def _extract_designer_developer(lines: List[str], extracted: Dict[str, str]) -> None:
-    """Extract designer/developer from context."""
-    if 'designer_developer' in extracted:
-        return
-        
-    for i, line in enumerate(lines):
-        line_lower = line.lower()
-        
-        if 'created by' in line_lower or 'author' in line_lower:
-            if '/' in line:
-                parts = re.split(r'created\s*by\s*/\s*author\s*[:\s]*', line, flags=re.IGNORECASE)
-                if len(parts) > 1:
-                    candidate_name = parts[1].strip()
-                    if _is_valid_designer_name(candidate_name):
-                        extracted['designer_developer'] = candidate_name
-                        break
-            else:
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    if _is_valid_designer_name(next_line):
-                        extracted['designer_developer'] = next_line
-                        break
 
 
 def _extract_date_and_year(lines: List[str], extracted: Dict[str, str]) -> None:
@@ -210,8 +194,11 @@ def _extract_date_and_year(lines: List[str], extracted: Dict[str, str]) -> None:
     for line in lines:
         date_match = re.search(r'(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', line)
         if date_match:
-            extracted['date'] = date_match.group(1)
-            year_match = re.search(r'(20\d{2})', date_match.group(1))
+            # Extract only the part before comma
+            date_value = date_match.group(1)
+            date_part = date_value.split(',')[0].strip()
+            extracted['date'] = date_part
+            year_match = re.search(r'(20\d{2})', date_part)
             if year_match and 'season_year' not in extracted:
                 extracted['season_year'] = year_match.group(1)
             break
@@ -260,9 +247,134 @@ def _extract_season_year_smart(text: str, extracted: Dict[str, str]) -> None:
         return
 
 
+def _extract_bom_fields(extracted: Dict[str, str], bom_tables: List[Dict], verbose: bool = False) -> None:
+    """Extract Composition, Material Finishes, and Yarn Gauge from BOM tables."""
+    if verbose:
+        print(f"   🔍 Analyzing {len(bom_tables)} BOM table groups for material fields...")
+    
+    for group_idx, group in enumerate(bom_tables):
+        if not group.get('merged_data') or len(group['merged_data']) < 2:
+            if verbose:
+                print(f"     ⚠️ BOM Group {group_idx + 1}: No valid data")
+            continue
+            
+        headers = group['merged_data'][0]
+        rows = group['merged_data'][1:]
+        
+        if verbose:
+            print(f"     📋 BOM Group {group_idx + 1}: {len(headers)} columns, {len(rows)} rows")
+            print(f"       Headers: {[str(h)[:20] + '...' if len(str(h)) > 20 else str(h) for h in headers]}")
+        
+        # Strategy 1: Look for main material column
+        main_material_col_idx = None
+        main_material_row = None
+        
+        for i, header in enumerate(headers):
+            if header and 'main material' in str(header).lower():
+                main_material_col_idx = i
+                if verbose:
+                    print(f"       ✓ Found 'main material' column at index {i}")
+                break
+        
+        if main_material_col_idx is not None:
+            # Find the row with main material marked
+            for row_idx, row in enumerate(rows):
+                if (main_material_col_idx < len(row) and 
+                    row[main_material_col_idx] and 
+                    str(row[main_material_col_idx]).strip()):
+                    main_material_row = row
+                    if verbose:
+                        print(f"       ✓ Found main material row at index {row_idx}")
+                    break
+        
+        # Strategy 2: If no main material column, look for the first row with substantial data
+        if main_material_row is None:
+            if verbose:
+                print(f"       ⚠️ No main material column found, trying first substantial row...")
+            
+            for row_idx, row in enumerate(rows):
+                # Count non-empty cells
+                non_empty_cells = sum(1 for cell in row if cell and str(cell).strip())
+                if non_empty_cells >= 3:  # At least 3 non-empty cells
+                    main_material_row = row
+                    if verbose:
+                        print(f"       ✓ Using row {row_idx} as main material row ({non_empty_cells} non-empty cells)")
+                    break
+        
+        if main_material_row is None:
+            if verbose:
+                print(f"       ❌ No suitable main material row found")
+            continue
+            
+        # Extract fields from the main material row
+        if verbose:
+            print(f"       🔍 Extracting fields from main material row...")
+        
+        for i, header in enumerate(headers):
+            if i >= len(main_material_row):
+                continue
+                
+            header_lower = str(header).lower().strip()
+            cell_value = str(main_material_row[i]).strip()
+            
+            if not cell_value:
+                continue
+                
+            # Normalize header by removing extra spaces and converting to lowercase
+            normalized_header = ' '.join(header_lower.split())
+                
+            if verbose:
+                print(f"         Column {i}: '{header}' = '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
+                print(f"           Normalized: '{normalized_header}'")
+            
+            if ('composition' not in extracted or not extracted['composition']):
+                # Check for exact matches first (Material Information or Product)
+                if normalized_header == 'material information' or normalized_header == 'product':
+                    extracted['composition'] = cell_value
+                    if verbose:
+                        print(f"         ✓ Extracted Composition from '{header}': '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
+            
+            # Extract Material Finishes
+            if ('material_finishes' not in extracted or not extracted['material_finishes']):
+                finish_keywords = ['material finishes', 'finishes', 'finish', 'treatment', 'coating']
+                if any(keyword in header_lower for keyword in finish_keywords):
+                    extracted['material_finishes'] = cell_value
+                    if verbose:
+                        print(f"         ✓ Extracted Material Finishes: '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
+            
+            # Extract Yarn Gauge (concatenate Gauge + "/" + Number of Ends)
+            if ('yarn_gauge' not in extracted or not extracted['yarn_gauge']):
+                gauge_keywords = ['gauge', 'count', 'denier', 'tex']
+                if any(keyword in header_lower for keyword in gauge_keywords):
+                    gauge_value = cell_value
+                    # Look for Number of Ends in the same row
+                    number_of_ends_value = ""
+                    for j, end_header in enumerate(headers):
+                        end_keywords = ['number of ends', 'ends', 'filaments', 'strands']
+                        if any(keyword in str(end_header).lower() for keyword in end_keywords):
+                            if j < len(main_material_row) and main_material_row[j]:
+                                number_of_ends_value = str(main_material_row[j]).strip()
+                            break
+                    
+                    if number_of_ends_value:
+                        extracted['yarn_gauge'] = f"{gauge_value}/{number_of_ends_value}"
+                        if verbose:
+                            print(f"         ✓ Extracted Yarn Gauge: '{gauge_value}/{number_of_ends_value}'")
+                    else:
+                        extracted['yarn_gauge'] = gauge_value
+                        if verbose:
+                            print(f"         ✓ Extracted Yarn Gauge: '{gauge_value}'")
+    
+    if verbose:
+        print(f"   📊 BOM Field Extraction Summary:")
+        print(f"     Composition: '{extracted.get('composition', '')}'")
+        print(f"     Material Finishes: '{extracted.get('material_finishes', '')}'")
+        print(f"     Yarn Gauge: '{extracted.get('yarn_gauge', '')}'")
+
+
 def _extract_brand_from_pool(text: str, brand_pool: List[str], extracted: Dict[str, str], verbose: bool = False) -> None:
     """Extract brand from predefined brand pool anywhere in the document."""
-    if 'brand' in extracted and extracted['brand'] != 'not found':
+    if 'brand' in extracted and extracted['brand']:
         return
     
     # Official brand names mapping
@@ -305,59 +417,6 @@ def _extract_brand_from_pool(text: str, brand_pool: List[str], extracted: Dict[s
             extracted['brand'] = official_name
             return
 
-def _is_valid_designer_name(name: str) -> bool:
-    """Check if string is a valid designer/developer name, excluding dates and emails."""
-    if not name:
-        return False
-    
-    name = re.sub(r'[^\w\s]', ' ', name).strip()
-    name = ' '.join(name.split())
-    
-    if '@' in name or '.com' in name.lower() or '.org' in name.lower():
-        return False
-    
-    date_patterns = [
-        r'\b\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}\b',
-        r'\b\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}\b',
-        r'\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{2,4}\b',
-        r'\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2},?\s+\d{2,4}\b'
-    ]
-    
-    for pattern in date_patterns:
-        if re.search(pattern, name, re.IGNORECASE):
-            return False
-    
-    if re.search(r'\d', name) and len(re.findall(r'\d', name)) > len(name) // 3:
-        return False
-    
-    if not re.search(r'[a-zA-Z]', name):
-        return False
-    
-    invalid_names = [
-        'factory ppc', 'sample size', 'ppc', 'n/a', 'na', 'none', 'null', 
-        'tbd', 'to be determined', 'pending', 'unknown', 'see notes',
-        'various', 'multiple', 'team', 'department'
-    ]
-    
-    if name.lower() in invalid_names:
-        return False
-    
-    if len(name) < 2 or len(name) > 50:
-        return False
-    
-    words = name.split()
-    
-    if len(words) == 0 or len(words) > 3:
-        return False
-    
-    for word in words:
-        if len(word) < 1:
-            return False
-        alpha_chars = sum(1 for c in word if c.isalpha())
-        if alpha_chars < len(word) * 0.7:
-            return False
-    
-    return True
 
 
 def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> List[Dict]:
@@ -417,6 +476,88 @@ def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> Lis
     return extracted_images
 
 
+def debug_bom_tables(bom_tables: List[Dict]) -> None:
+    """Debug function to inspect BOM table structure."""
+    print(f"\n🔍 BOM TABLE DEBUG INFO:")
+    print(f"   Total BOM groups: {len(bom_tables)}")
+    
+    for i, group in enumerate(bom_tables, 1):
+        print(f"\n   📋 BOM Group {i}:")
+        
+        if not group.get('merged_data'):
+            print(f"     ❌ No merged data")
+            continue
+            
+        headers = group['merged_data'][0]
+        rows = group['merged_data'][1:]
+        
+        print(f"     Headers ({len(headers)}): {headers}")
+        print(f"     Rows: {len(rows)}")
+        
+        # Show first few rows
+        for j, row in enumerate(rows[:3]):  # Show first 3 rows
+            print(f"       Row {j+1}: {row}")
+        
+        if len(rows) > 3:
+            print(f"       ... and {len(rows) - 3} more rows")
+    
+    print()
+
+
+def extract_from_multiple_pdfs(pdf_paths: List[str], verbose: bool = False) -> List[Dict]:
+    """Extract data from multiple PDF files."""
+    if verbose:
+        print(f"📄 Processing {len(pdf_paths)} PDF files...")
+    
+    results = []
+    
+    for i, pdf_path in enumerate(pdf_paths, 1):
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"Processing file {i}/{len(pdf_paths)}: {os.path.basename(pdf_path)}")
+            print(f"{'='*60}")
+        
+        try:
+            result = extract_from_pdf(pdf_path, verbose=verbose)
+            if result:
+                result['filename'] = os.path.basename(pdf_path)
+                result['file_path'] = pdf_path
+                results.append(result)
+            else:
+                results.append({
+                    'filename': os.path.basename(pdf_path),
+                    'file_path': pdf_path,
+                    'error': 'Failed to extract data'
+                })
+                
+        except Exception as e:
+            if verbose:
+                print(f"❌ Error processing {os.path.basename(pdf_path)}: {e}")
+            results.append({
+                'filename': os.path.basename(pdf_path),
+                'file_path': pdf_path,
+                'error': str(e)
+            })
+    
+    if verbose:
+        successful = len([r for r in results if 'error' not in r])
+        failed = len([r for r in results if 'error' in r])
+        print(f"\n{'='*60}")
+        print(f"📊 BATCH PROCESSING SUMMARY")
+        print(f"{'='*60}")
+        print(f"Total files: {len(pdf_paths)}")
+        print(f"Successful: {successful}")
+        print(f"Failed: {failed}")
+        
+        if failed > 0:
+            print(f"\n❌ Failed files:")
+            for result in results:
+                if 'error' in result:
+                    print(f"  • {result['filename']}: {result['error']}")
+    
+    return results
+
+
 def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
     """Extract product identifiers, BOM tables, and measurements from PDF."""
     if verbose:
@@ -453,11 +594,14 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
                 result['full_text'] += f"\n--- Page {page_num} ---\n{text}"
                 text_lower = text.lower()
                 
-                # Process page 1 for identifiers and tables
-                if page_num == 1:
-                    result['first_page_text'] = text
+                # Process pages 1-2 for identifiers and tables
+                if page_num <= 2:
+                    if page_num == 1:
+                        result['first_page_text'] = text
+                    else:
+                        result['first_page_text'] += f"\n--- Page {page_num} ---\n{text}"
                     if verbose:
-                        print(f"   📋 Page 1: Captured for identifier extraction and table detection")
+                        print(f"   📋 Page {page_num}: Captured for identifier extraction and table detection")
                 
                 # Extract images from "Image Data Sheet" pages
                 if image_keyword in text_lower:
@@ -516,6 +660,13 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
         
         result['bom_tables'] = _merge_similar_tables(bom_tables, "BOM", verbose)
         result['measurement_tables'] = _merge_similar_tables(measurement_tables, "Measurement", verbose)
+        
+        # Debug BOM tables if verbose
+        if verbose:
+            debug_bom_tables(result['bom_tables'])
+        
+        # Extract BOM-specific fields (Composition, Material Finishes, Yarn Gauge)
+        _extract_bom_fields(result['fields'], result['bom_tables'], verbose)
         result['image_sketches'] = image_sketches
         result['text_length'] = len(result['full_text'])
         result['first_page_length'] = len(result['first_page_text'])
@@ -1114,7 +1265,7 @@ def _merge_tables_by_identifier(tables: List[Dict]) -> List[List]:
 def _print_extraction_summary(result: Dict, raw_bom_tables: List, raw_measurement_tables: List, image_sketches: List = None) -> None:
     """Print extraction summary."""
     fields = result['fields']
-    found_count = sum(1 for v in fields.values() if v != 'not found')
+    found_count = sum(1 for v in fields.values() if v)
     
     # Count pages for BOM
     bom_pages = set(t['page'] for t in raw_bom_tables) if raw_bom_tables else set()
@@ -1122,7 +1273,7 @@ def _print_extraction_summary(result: Dict, raw_bom_tables: List, raw_measuremen
     image_pages = set(img['page'] for img in image_sketches) if image_sketches else set()
     
     print(f"\n📊 EXTRACTION SUMMARY:")
-    print(f"   • Identifiers: {found_count}/6 found from Page 1")
+    print(f"   • Identifiers: {found_count}/10 found from Pages 1-2")
     print(f"   • BOM Tables: {len(raw_bom_tables)} tables from {len(bom_pages)} page(s) {sorted(bom_pages)}" if bom_pages else "   • BOM Tables: None found")
     print(f"   • Measurement Tables: {len(raw_measurement_tables)} tables from {len(measurement_pages)} page(s) {sorted(measurement_pages)}" if measurement_pages else "   • Measurement Tables: None found")
     print(f"   • Image Sketches: {len(image_sketches)} image(s) from {len(image_pages)} page(s) {sorted(image_pages)}" if image_sketches else "   • Image Sketches: None found")
@@ -1199,23 +1350,27 @@ def display_results(result: Dict) -> None:
     print("-" * 30)
     
     field_labels = {
-        'style_name': 'Style Name',
-        'style_number': 'Style Number', 
         'brand': 'Brand',
-        'season_year': 'Season/Year',
-        'designer_developer': 'Designer/Developer',
+        'description': 'Description',
+        'style_number': 'Style Number',
+        'season_year': 'Season Year',
+        'composition': 'Composition',
+        'material_finishes': 'Material Finishes',
+        'yarn_gauge': 'Yarn Gauge',
+        'model_id': 'Model Id',
+        'product_line': 'Product Line',
         'date': 'Date'
     }
     
     fields = result['fields']
-    found_count = sum(1 for v in fields.values() if v != 'not found')
+    found_count = sum(1 for v in fields.values() if v)
     
     for field_key, label in field_labels.items():
-        value = fields.get(field_key, 'not found')
-        status = "✓" if value != 'not found' else "✗"
+        value = fields.get(field_key, '')
+        status = "✓" if value else "✗"
         print(f"  {status} {label:15}: {value}")
     
-    print(f"\n📊 Found: {found_count}/6 identifiers")
+    print(f"\n📊 Found: {found_count}/10 identifiers")
     
     # Tables Summary
     bom_count = len(result.get('bom_tables', []))
@@ -1241,16 +1396,46 @@ def main():
         print("💡 Try running the Streamlit app: streamlit run streamlit_app.py")
         return
     
-    pdf_file = pdf_files[0]
-    print(f"🎯 Processing: {pdf_file}")
+    print(f"🎯 Found {len(pdf_files)} PDF file(s)")
     
-    # Extract and display results
-    result = extract_from_pdf(pdf_file, verbose=True)
-    if result:
-        display_results(result)
-        print(f"\n💡 For detailed table viewing, run: streamlit run streamlit_app.py")
+    if len(pdf_files) == 1:
+        # Single file processing
+        pdf_file = pdf_files[0]
+        print(f"📄 Processing: {pdf_file}")
+        
+        result = extract_from_pdf(pdf_file, verbose=True)
+        if result:
+            display_results(result)
+            print(f"\n💡 For detailed table viewing, run: streamlit run streamlit_app.py")
+        else:
+            print("❌ Extraction failed")
     else:
-        print("❌ Extraction failed")
+        # Batch processing
+        print(f"📄 Processing {len(pdf_files)} files in batch...")
+        
+        results = extract_from_multiple_pdfs(pdf_files, verbose=True)
+        
+        # Display batch summary
+        successful = [r for r in results if 'error' not in r]
+        failed = [r for r in results if 'error' in r]
+        
+        print(f"\n📊 BATCH RESULTS SUMMARY:")
+        print(f"   Total files: {len(pdf_files)}")
+        print(f"   Successful: {len(successful)}")
+        print(f"   Failed: {len(failed)}")
+        
+        if successful:
+            print(f"\n✅ Successfully processed files:")
+            for result in successful:
+                found_count = len([v for v in result['fields'].values() if v])
+                print(f"   • {result['filename']}: {found_count}/10 identifiers found")
+        
+        if failed:
+            print(f"\n❌ Failed files:")
+            for result in failed:
+                print(f"   • {result['filename']}: {result['error']}")
+        
+        print(f"\n💡 For detailed table viewing and batch export, run: streamlit run streamlit_app.py")
 
 
 # Backward compatibility - keep these functions for Streamlit
@@ -1261,12 +1446,16 @@ def export_to_csv(result: Dict, base_filename: str) -> None:
         
         # Export identifiers
         identifier_data = {
-            'Style_Name': fields.get('style_name', 'not found'),
-            'Style_Number': fields.get('style_number', 'not found'),
-            'Brand': fields.get('brand', 'not found'),
-            'Season_Year': fields.get('season_year', 'not found'),
-            'Designer_Developer': fields.get('designer_developer', 'not found'),
-            'Date': fields.get('date', 'not found'),
+            'Brand': fields.get('brand', ''),
+            'Description': fields.get('description', ''),
+            'Style_Number': fields.get('style_number', ''),
+            'Season_Year': fields.get('season_year', ''),
+            'Composition': fields.get('composition', ''),
+            'Material_Finishes': fields.get('material_finishes', ''),
+            'Yarn_Gauge': fields.get('yarn_gauge', ''),
+            'Model_Id': fields.get('model_id', ''),
+            'Product_Line': fields.get('product_line', ''),
+            'Date': fields.get('date', ''),
         }
         
         df_identifiers = pd.DataFrame([identifier_data])
