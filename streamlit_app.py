@@ -466,24 +466,15 @@ def create_structured_json(result):
 
 def display_batch_results(results):
     """Display results from batch processing of multiple files using tabbed interface."""
-    # st.markdown("---")
-    # st.markdown("### 📊 Batch Processing Results")
-    
-    # Summary statistics
     successful_extractions = [r for r in results if 'error' not in r]
     failed_extractions = [r for r in results if 'error' in r]
     
-    # Show failed files if any
     if failed_extractions:
         st.markdown("#### ❌ Failed Extractions")
         for result in failed_extractions:
             st.error(f"**{result['filename']}**: {result['error']}")
     
-    # Show successful results with tabbed interface
     if successful_extractions:
-        # st.success(f"✅ **Processing Complete!** {len(successful_extractions)} file(s) processed successfully")
-        
-        # Batch summary table - moved outside tabs
         st.markdown("#### 📋 Files Summary")
         summary_data = []
         for result in successful_extractions:
@@ -504,7 +495,6 @@ def display_batch_results(results):
         
         st.markdown("---")
         
-        # File selection dropdown
         file_names = [f"{result['filename']} ({result['file_size_mb']:.1f}MB)" for result in successful_extractions]
         selected_file_idx = st.selectbox(
             "Select file to view:",
@@ -515,10 +505,8 @@ def display_batch_results(results):
         selected_result = successful_extractions[selected_file_idx]
         filename_base = selected_result['filename'].replace('.pdf', '').replace(' ', '_')
         
-        # Tab selection with session state support
         tab_options = ["📋 Summary", "🏷️ Identifiers", "📋 BOM", "📏 Measurements", "🖼️ Sketches"]
         
-        # Create clickable tab buttons with container
         st.markdown('<div class="tab-container">', unsafe_allow_html=True)
         cols = st.columns(5)
         for idx, (col, tab_name) in enumerate(zip(cols, tab_options)):
@@ -529,31 +517,7 @@ def display_batch_results(results):
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
         
-        
-        
-        # Display content based on active tab
-        if st.session_state['active_tab'] == 0:  # Summary
-            # st.markdown("### 📊 Extraction Summary")
-            # col1, col2, col3, col4 = st.columns(4)
-            
-            # with col1:
-            #     found_identifiers = len([v for v in selected_result['fields'].values() if v])
-            #     total_identifiers = 10
-            #     st.metric("Product Identifiers", f"{found_identifiers}/{total_identifiers}")
-            
-            # with col2:
-            #     bom_count = len(selected_result.get('bom_tables', []))
-            #     st.metric("BOM Tables", bom_count)
-            
-            # with col3:
-            #     measurement_count = len(selected_result.get('measurement_tables', []))
-            #     st.metric("Measurement Tables", measurement_count)
-            
-            # with col4:
-            #     image_count = len(selected_result.get('image_sketches', []))
-            #     st.metric("Image Sketches", image_count)
-            
-            # Individual file metrics
+        if st.session_state['active_tab'] == 0:
             st.markdown("#### 📊 Selected File Metrics")
             col1, col2, col3, col4 = st.columns(4)
             
@@ -574,12 +538,11 @@ def display_batch_results(results):
                 image_count = len(selected_result.get('image_sketches', []))
                 st.metric("Image Sketches", image_count)
         
-        elif st.session_state['active_tab'] == 1:  # Identifiers
+        elif st.session_state['active_tab'] == 1:
             st.markdown("### 🏷️ Product Identifiers")
             
             fields = selected_result.get('fields', {})
             
-            # Define field order and labels
             field_order = [
                 ('brand', 'Brand'),
                 ('description', 'Description'),
@@ -604,29 +567,26 @@ def display_batch_results(results):
             else:
                 st.warning("No identifier data found")
         
-        elif st.session_state['active_tab'] == 2:  # BOM
+        elif st.session_state['active_tab'] == 2:
             st.markdown("### 📋 Bill of Materials (BOM)")
             bom_tables = selected_result.get('bom_tables', [])
             if bom_tables:
                 for i, group in enumerate(bom_tables, 1):
                     display_table_group(group, "BOM", i)
                 
-                # Add Preliminary Costing button
                 st.markdown("---")
                 if st.button("Run Preliminary Costing", type="primary", use_container_width=True):
                     import time
                     with st.spinner('Calculating preliminary costs...'):
                         time.sleep(0.5)
                     st.session_state['show_costing'] = True
-                    st.session_state['active_tab'] = 2  # Stay on BOM tab
+                    st.session_state['active_tab'] = 2
                 
-                # Display costing information if button was clicked
                 if st.session_state.get('show_costing', False):
                     st.markdown("---")
                     
                     st.markdown("#### BOM Table with Estimated Costs:")
                     
-                    # Create costing table
                     costing_data = {
                         'Component': [
                             'Yarn A - YRN0001145- REGAL PPLG25041004 1/13NM 75% ACRYLIC 3% SPANDEX 22% POLYESTER',
@@ -643,7 +603,6 @@ def display_batch_results(results):
                     df_costing = pd.DataFrame(costing_data)
                     st.dataframe(df_costing, use_container_width=True, hide_index=True)
                     
-                    # Summary section
                     st.markdown("#### Summary:")
                     st.markdown(""" 
 **Total material cost** - \$8.23  
@@ -654,7 +613,7 @@ def display_batch_results(results):
             else:
                 st.warning("No BOM tables found")
         
-        elif st.session_state['active_tab'] == 3:  # Measurements
+        elif st.session_state['active_tab'] == 3:
             st.markdown("### 📏 Measurements & Fit Specifications")
             measurement_tables = selected_result.get('measurement_tables', [])
             if measurement_tables:
@@ -663,17 +622,15 @@ def display_batch_results(results):
             else:
                 st.warning("No measurement tables found")
         
-        elif st.session_state['active_tab'] == 4:  # Sketches
+        elif st.session_state['active_tab'] == 4:
             st.markdown("### 🖼️ Image Data Sheet Sketches")
             image_sketches = selected_result.get('image_sketches', [])
             
             if image_sketches:
                 st.write(f"**Found {len(image_sketches)} sketch(es)**")
                 
-                # Get image uploader from session state
                 uploader = st.session_state.get('image_uploader')
                 
-                # Upload images and get persistent URLs
                 if f'uploaded_images_{filename_base}' not in st.session_state:
                     with st.spinner('☁️ Uploading images to cloud storage...'):
                         uploaded_results = uploader.upload_multiple(image_sketches, filename_base)
@@ -681,7 +638,6 @@ def display_batch_results(results):
                 else:
                     uploaded_results = st.session_state[f'uploaded_images_{filename_base}']
                 
-                # Display uploaded images with persistent URLs
                 for i, img_data in enumerate(uploaded_results, 1):
                     page_num = img_data['page']
                     img_index = img_data.get('image_index', i)
@@ -691,10 +647,8 @@ def display_batch_results(results):
                     st.markdown(f"#### Sketch {i} - Page {page_num}")
                     st.caption(f"🖼️ {img_name} (Image {img_index} on page)")
                     
-                    # Display the image from extracted data
                     st.image(img_data['image_data'], use_container_width=True)
                     
-                    # Show persistent URL and actions
                     if upload_info and upload_info.get('url'):
                         col1, col2, col3 = st.columns([4, 1, 1])
                         with col1:
@@ -728,11 +682,9 @@ def display_batch_results(results):
             else:
                 st.info("ℹ️ No images found in 'Image Data Sheet' pages. Make sure the PDF contains embedded images.")
         
-        # Export Data section - moved to bottom
         st.markdown("---")
         st.markdown("#### 📁 Export Data")
         
-        # Create download button with loading state
         if st.button("📊 Export Data", type="primary", use_container_width=True):
             with st.spinner('🔄 Generating Excel File...'):
                 excel_data = create_single_excel_export(successful_extractions)
@@ -740,7 +692,6 @@ def display_batch_results(results):
                 st.session_state['excel_ready'] = True
                 st.success("✅ Excel file ready for download!")
         
-        # Show download button only when file is ready
         if st.session_state.get('excel_ready', False):
             st.download_button(
                 label="📥 Download Excel File",
@@ -754,15 +705,21 @@ def display_batch_results(results):
 
 def create_single_excel_export(results):
     """Create a single Excel file with Summary sheet and individual BOM sheets."""
+    import io
+    import pandas as pd
+    from openpyxl.utils import get_column_letter
+    from openpyxl.cell.cell import Cell
+    import streamlit as st
+
     excel_buffer = io.BytesIO()
-    
+
     # Ensure images are uploaded before creating Excel
     uploader = st.session_state.get('image_uploader')
     if uploader:
         for result in results:
             filename_base = result['filename'].replace('.pdf', '').replace(' ', '_')
             uploaded_images_key = f'uploaded_images_{filename_base}'
-            
+
             # Upload images if not already uploaded
             if uploaded_images_key not in st.session_state:
                 image_sketches = result.get('image_sketches', [])
@@ -770,130 +727,101 @@ def create_single_excel_export(results):
                     try:
                         uploaded_results = uploader.upload_multiple(image_sketches, filename_base)
                         st.session_state[uploaded_images_key] = uploaded_results
-                        print(f"Uploaded images for {filename_base}")
-                    except Exception as e:
-                        print(f"Failed to upload images for {filename_base}: {e}")
-    
+                    except Exception:
+                        pass
+
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Create Summary sheet
         summary_data = []
-        
+
         for result in results:
             fields = result.get('fields', {})
-            
-            # Get first image if available
             image_sketches = result.get('image_sketches', [])
             first_image_url = ""
             if image_sketches:
-                # Try to get the first image URL if uploaded
                 filename_base = result['filename'].replace('.pdf', '').replace(' ', '_')
                 uploaded_images_key = f'uploaded_images_{filename_base}'
                 if uploaded_images_key in st.session_state:
                     uploaded_results = st.session_state[uploaded_images_key]
                     if uploaded_results and uploaded_results[0].get('upload', {}).get('url'):
                         first_image_url = uploaded_results[0]['upload']['url']
-            
+
             summary_row = {
                 'Brand': fields.get('brand', ''),
-                'Style Name': fields.get('description', ''),  # Using description as Style Name
+                'Style Name': fields.get('description', ''),
                 'Style Number': fields.get('style_number', ''),
                 'Season Year': fields.get('season_year', ''),
                 'Composition': fields.get('composition', ''),
                 'Material Finishes': fields.get('material_finishes', ''),
                 'Yarn Gauge': fields.get('yarn_gauge', ''),
-                'Image': first_image_url,  # Store URL for IMAGE function
+                'Image': first_image_url,  # temp plain URL
                 'Model Id': fields.get('model_id', ''),
                 'Product Line': fields.get('product_line', ''),
                 'Date': fields.get('date', ''),
-                'C/O': '',  # Leave blank
-                'Target Prices': '',  # Leave blank
-                'Order Units': '',  # Leave blank
-                'FOB Price': '',  # Leave blank
-                'Diff +/- $': '',  # Will add formula
-                'GSC Profit & Loss %': '',  # Will add formula
-                'Final FOB Price': '',  # Leave blank
-                'Final Diff +/- $': '',  # Will add formula
-                'Final GSC Profit & Loss %': ''  # Will add formula
+                'C/O': '',
+                'Target Prices': '',
+                'Order Units': '',
+                'FOB Price': '',
+                'Diff +/- $': '',
+                'GSC Profit & Loss %': '',
+                'Final FOB Price': '',
+                'Final Diff +/- $': '',
+                'Final GSC Profit & Loss %': ''
             }
             summary_data.append(summary_row)
-        
-        # Create Summary DataFrame
+
         df_summary = pd.DataFrame(summary_data)
-        
-        # Add IMAGE function formulas BEFORE writing to Excel
-        from openpyxl.utils import get_column_letter
-        
-        # Find the Image column (column H)
-        image_col = 8  # Column H
-        
-        # Replace Image column values with IMAGE formulas
-        for row_idx, row_data in enumerate(summary_data, start=1):  # Start from row 1 (include header)
-            if row_idx > 1 and row_data.get('Image'):  # Skip header row
-                image_url = row_data['Image']
-                # Ensure all image URLs get the IMAGE formula, not plain URLs
-                df_summary.iloc[row_idx-1, image_col-1] = f'{image_url}'
-        
-        # Now write to Excel
         df_summary.to_excel(writer, sheet_name='Summary', index=False)
-        
-        # Adjust row heights and column widths
-        worksheet = writer.sheets['Summary']
-        
-        for row_idx, row_data in enumerate(summary_data, start=2):  # Sthttps://i.ibb.co/93mdSkWN/4-L3010-S-LS-TEXTURE-FASHION-TBD-4-L3010-S-LS-TEXTURE-FASHION-TBD-F2026-Calvin-Klein-en-page4-img1.pngart from row 2 (skip header)
-            if row_data.get('Image'):  # If there's an image URL
-                try:
-                    # Adjust row height to accommodate image
-                    worksheet.row_dimensions[row_idx].height = 75  # points
-                    
-                    # Set column width for Image column
-                    worksheet.column_dimensions[get_column_letter(image_col)].width = 15
-                    
-                except Exception as e:
-                    print(f"Failed to adjust dimensions for row {row_idx}: {e}")
-        
-        # Add formulas for each row (starting from row 2)
+
         workbook = writer.book
-        for row_num in range(2, len(summary_data) + 2):
-            worksheet[f'P{row_num}'] = f'=$M{row_num}-$O{row_num}'
-            worksheet[f'Q{row_num}'] = f'=$P{row_num}/$M{row_num}'
-            worksheet[f'S{row_num}'] = f'=$M{row_num}-$R{row_num}'
+        worksheet = writer.sheets['Summary']
+
+        image_col = 8
+        col_letter = get_column_letter(image_col)
+
+        for row_idx, row_data in enumerate(summary_data, start=2):
+            image_url = row_data.get('Image')
+            if image_url:
+                cell = worksheet[f'{col_letter}{row_idx}']
+                cell.data_type = 's'           
+                cell._value = f'=IMAGE("{image_url}")'  
+                worksheet.row_dimensions[row_idx].height = 75
+                worksheet.column_dimensions[col_letter].width = 15
+
+        for row_num in range(2, len(summary_data) + 2): 
+            worksheet[f'P{row_num}'] = f'=$M{row_num}-$O{row_num}' 
+            worksheet[f'Q{row_num}'] = f'=$P{row_num}/$M{row_num}' 
+            worksheet[f'S{row_num}'] = f'=$M{row_num}-$R{row_num}' 
             worksheet[f'T{row_num}'] = f'=$S{row_num}/$M{row_num}'
-        
-        # Create BOM sheets for each file
+
         for result in results:
             fields = result.get('fields', {})
             style_number = fields.get('style_number', '')
             bom_tables = result.get('bom_tables', [])
-            
             if bom_tables:
                 for i, group in enumerate(bom_tables, 1):
-                    if group.get('merged_data') and len(group['merged_data']) > 0:
-                        headers = group['merged_data'][0]
-                        rows = group['merged_data'][1:]
-                        
+                    merged = group.get('merged_data')
+                    if merged and len(merged) > 1:
+                        headers = merged[0]
+                        rows = merged[1:]
                         clean_headers = clean_column_names(headers)
-                        normalized_rows = []
-                        for row in rows:
-                            normalized_row = row[:len(clean_headers)]
-                            while len(normalized_row) < len(clean_headers):
-                                normalized_row.append("")
-                            normalized_rows.append(normalized_row)
-                        
-                        if normalized_rows:
-                            df_bom = pd.DataFrame(normalized_rows, columns=clean_headers)
-                            # Use Style Number for sheet name
-                            if style_number:
-                                sheet_name = f"{style_number} - BOM" if i == 1 else f"{style_number} - BOM {i}"
-                            else:
-                                # Fallback to filename if no style number
-                                filename_base = result['filename'].replace('.pdf', '').replace(' ', '_')
-                                sheet_name = f"{filename_base} - BOM" if i == 1 else f"{filename_base} - BOM {i}"
-                            # Limit sheet name to 31 characters (Excel limit)
-                            sheet_name = sheet_name[:31]
-                            df_bom.to_excel(writer, sheet_name=sheet_name, index=False)
-    
+                        normalized_rows = [
+                            r[:len(clean_headers)] + [""] * (len(clean_headers) - len(r))
+                            for r in rows
+                        ]
+
+                        df_bom = pd.DataFrame(normalized_rows, columns=clean_headers)
+                        filename_base = result['filename'].replace('.pdf', '').replace(' ', '_')
+                        if style_number:
+                            sheet_name = f"{style_number} - BOM" if i == 1 else f"{style_number} - BOM {i}"
+                        else:
+                            sheet_name = f"{filename_base} - BOM" if i == 1 else f"{filename_base} - BOM {i}"
+                        df_bom.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
     excel_buffer.seek(0)
     return excel_buffer.getvalue()
+
+
+
 
 
 def create_batch_json(results):
@@ -1144,12 +1072,10 @@ def create_excel_export_zip(result, filename_base):
 def main():
     st.markdown('<h1 class="main-header">Tech Pack OCR Demo</h1>', unsafe_allow_html=True)
     
-    # Initialize image uploader with API key (no UI config needed)
     api_key = os.getenv('IMGBB_API_KEY', "5b7554e6b9164c3060d6bc5149748582")
     image_uploader = ImageUploader(api_key)
     st.session_state['image_uploader'] = image_uploader
     
-    # Initialize session state for costing display and active tab
     if 'show_costing' not in st.session_state:
         st.session_state['show_costing'] = False
     if 'active_tab' not in st.session_state:
@@ -1173,21 +1099,14 @@ def main():
                 st.write(error)
             return
         
-        # Show file summary
-        total_size_mb = sum(f.size for f in uploaded_files) / (1024 * 1024)
-        # st.success(f"✅ **Files accepted:** {len(uploaded_files)} PDF file(s) ({total_size_mb:.1f}MB total)")
-        
-        # Show file list
         with st.expander(f"📁 Uploaded Files ({len(uploaded_files)})"):
             for i, file in enumerate(uploaded_files, 1):
                 file_size_mb = file.size / (1024 * 1024)
                 st.write(f"{i}. {file.name} ({file_size_mb:.1f}MB)")
         
-        # Extract button
         extract_clicked = st.button("Extract", type="primary", use_container_width=True)
         
         if extract_clicked:
-            # Process all files
             results = []
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -1201,7 +1120,6 @@ def main():
                     tmp_file_path = tmp_file.name
                 
                 try:
-                    # Process with minimal verbose output
                     result = extract_from_pdf(tmp_file_path, verbose=False)
                     if result:
                         result['filename'] = uploaded_file.name
@@ -1227,10 +1145,8 @@ def main():
             
             status_text.text("✅ Processing complete!")
             st.session_state['batch_results'] = results
-            # Reset Excel ready state when new files are processed
             st.session_state['excel_ready'] = False
             
-        # Display results if available
         if 'batch_results' in st.session_state and st.session_state['batch_results']:
             display_batch_results(st.session_state['batch_results'])
 

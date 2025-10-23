@@ -172,7 +172,6 @@ def _clean_value(value: str, field_type: str) -> str:
         return None
     
     if field_type == 'date':
-        # Extract only the part before comma
         date_part = value.split(',')[0].strip()
         date_match = re.search(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', date_part)
         return date_match.group(0) if date_match else date_part
@@ -194,7 +193,6 @@ def _extract_date_and_year(lines: List[str], extracted: Dict[str, str]) -> None:
     for line in lines:
         date_match = re.search(r'(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})', line)
         if date_match:
-            # Extract only the part before comma
             date_value = date_match.group(1)
             date_part = date_value.split(',')[0].strip()
             extracted['date'] = date_part
@@ -249,66 +247,38 @@ def _extract_season_year_smart(text: str, extracted: Dict[str, str]) -> None:
 
 def _extract_bom_fields(extracted: Dict[str, str], bom_tables: List[Dict], verbose: bool = False) -> None:
     """Extract Composition, Material Finishes, and Yarn Gauge from BOM tables."""
-    if verbose:
-        print(f"   🔍 Analyzing {len(bom_tables)} BOM table groups for material fields...")
-    
     for group_idx, group in enumerate(bom_tables):
         if not group.get('merged_data') or len(group['merged_data']) < 2:
-            if verbose:
-                print(f"     ⚠️ BOM Group {group_idx + 1}: No valid data")
             continue
             
         headers = group['merged_data'][0]
         rows = group['merged_data'][1:]
         
-        if verbose:
-            print(f"     📋 BOM Group {group_idx + 1}: {len(headers)} columns, {len(rows)} rows")
-            print(f"       Headers: {[str(h)[:20] + '...' if len(str(h)) > 20 else str(h) for h in headers]}")
-        
-        # Strategy 1: Look for main material column
         main_material_col_idx = None
         main_material_row = None
         
         for i, header in enumerate(headers):
             if header and 'main material' in str(header).lower():
                 main_material_col_idx = i
-                if verbose:
-                    print(f"       ✓ Found 'main material' column at index {i}")
                 break
         
         if main_material_col_idx is not None:
-            # Find the row with main material marked
             for row_idx, row in enumerate(rows):
                 if (main_material_col_idx < len(row) and 
                     row[main_material_col_idx] and 
                     str(row[main_material_col_idx]).strip()):
                     main_material_row = row
-                    if verbose:
-                        print(f"       ✓ Found main material row at index {row_idx}")
                     break
         
-        # Strategy 2: If no main material column, look for the first row with substantial data
         if main_material_row is None:
-            if verbose:
-                print(f"       ⚠️ No main material column found, trying first substantial row...")
-            
             for row_idx, row in enumerate(rows):
-                # Count non-empty cells
                 non_empty_cells = sum(1 for cell in row if cell and str(cell).strip())
-                if non_empty_cells >= 3:  # At least 3 non-empty cells
+                if non_empty_cells >= 3:
                     main_material_row = row
-                    if verbose:
-                        print(f"       ✓ Using row {row_idx} as main material row ({non_empty_cells} non-empty cells)")
                     break
         
         if main_material_row is None:
-            if verbose:
-                print(f"       ❌ No suitable main material row found")
             continue
-            
-        # Extract fields from the main material row
-        if verbose:
-            print(f"       🔍 Extracting fields from main material row...")
         
         for i, header in enumerate(headers):
             if i >= len(main_material_row):
@@ -320,34 +290,21 @@ def _extract_bom_fields(extracted: Dict[str, str], bom_tables: List[Dict], verbo
             if not cell_value:
                 continue
                 
-            # Normalize header by removing extra spaces and converting to lowercase
             normalized_header = ' '.join(header_lower.split())
-                
-            if verbose:
-                print(f"         Column {i}: '{header}' = '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
-                print(f"           Normalized: '{normalized_header}'")
             
             if ('composition' not in extracted or not extracted['composition']):
-                # Check for exact matches first (Material Information or Product)
                 if normalized_header == 'material information' or normalized_header == 'product':
                     extracted['composition'] = cell_value
-                    if verbose:
-                        print(f"         ✓ Extracted Composition from '{header}': '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
             
-            # Extract Material Finishes
             if ('material_finishes' not in extracted or not extracted['material_finishes']):
                 finish_keywords = ['material finishes', 'finishes', 'finish', 'treatment', 'coating']
                 if any(keyword in header_lower for keyword in finish_keywords):
                     extracted['material_finishes'] = cell_value
-                    if verbose:
-                        print(f"         ✓ Extracted Material Finishes: '{cell_value[:50]}{'...' if len(cell_value) > 50 else ''}'")
             
-            # Extract Yarn Gauge (concatenate Gauge + "/" + Number of Ends)
             if ('yarn_gauge' not in extracted or not extracted['yarn_gauge']):
                 gauge_keywords = ['gauge', 'count', 'denier', 'tex']
                 if any(keyword in header_lower for keyword in gauge_keywords):
                     gauge_value = cell_value
-                    # Look for Number of Ends in the same row
                     number_of_ends_value = ""
                     for j, end_header in enumerate(headers):
                         end_keywords = ['number of ends', 'ends', 'filaments', 'strands']
@@ -358,18 +315,8 @@ def _extract_bom_fields(extracted: Dict[str, str], bom_tables: List[Dict], verbo
                     
                     if number_of_ends_value:
                         extracted['yarn_gauge'] = f"{gauge_value}/{number_of_ends_value}"
-                        if verbose:
-                            print(f"         ✓ Extracted Yarn Gauge: '{gauge_value}/{number_of_ends_value}'")
                     else:
                         extracted['yarn_gauge'] = gauge_value
-                        if verbose:
-                            print(f"         ✓ Extracted Yarn Gauge: '{gauge_value}'")
-    
-    if verbose:
-        print(f"   📊 BOM Field Extraction Summary:")
-        print(f"     Composition: '{extracted.get('composition', '')}'")
-        print(f"     Material Finishes: '{extracted.get('material_finishes', '')}'")
-        print(f"     Yarn Gauge: '{extracted.get('yarn_gauge', '')}'")
 
 
 def _extract_brand_from_pool(text: str, brand_pool: List[str], extracted: Dict[str, str], verbose: bool = False) -> None:
@@ -411,7 +358,6 @@ def _extract_brand_from_pool(text: str, brand_pool: List[str], extracted: Dict[s
                 extracted['brand'] = brand
                 return
     
-    # Check for variations and return official name
     for variation, official_name in official_brands.items():
         if variation in text_lower:
             extracted['brand'] = official_name
@@ -424,17 +370,11 @@ def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> Lis
     extracted_images = []
     
     try:
-        # Extract embedded images from the page
         if hasattr(page, 'images') and page.images:
-            if verbose:
-                print(f"   🖼️ Found {len(page.images)} embedded image(s) on page {page_num}")
-            
             for img_idx, img_info in enumerate(page.images):
                 try:
-                    # Get image object name
                     img_name = img_info.get('name', f'image_{img_idx+1}')
                     
-                    # Create bounding box from image info
                     bbox = (
                         img_info['x0'],
                         img_info['top'],
@@ -442,10 +382,8 @@ def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> Lis
                         img_info['top'] + img_info['height']
                     )
                     
-                    # Crop and extract the image at high resolution
                     cropped_img = page.within_bbox(bbox).to_image(resolution=300)
                     
-                    # Convert to bytes with high quality
                     import io
                     img_byte_arr = io.BytesIO()
                     cropped_img.original.save(img_byte_arr, format='PNG', optimize=False, compress_level=1)
@@ -458,20 +396,12 @@ def _extract_images_from_page(page, page_num: int, verbose: bool = False) -> Lis
                         'format': 'PNG',
                         'name': img_name
                     })
-                    
-                    if verbose:
-                        print(f"     ✓ Extracted image {img_idx + 1}: {img_name} (300 DPI)")
                 
-                except Exception as e:
-                    if verbose:
-                        print(f"     ✗ Could not extract image {img_idx + 1}: {e}")
-        else:
-            if verbose:
-                print(f"   ⚠️ No embedded images found on page {page_num}")
+                except Exception:
+                    pass
     
-    except Exception as e:
-        if verbose:
-            print(f"   ⚠️ Error processing page {page_num}: {e}")
+    except Exception:
+        pass
     
     return extracted_images
 
@@ -594,23 +524,22 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
                 result['full_text'] += f"\n--- Page {page_num} ---\n{text}"
                 text_lower = text.lower()
                 
-                # Process pages 1-2 for identifiers and tables
                 if page_num <= 2:
                     if page_num == 1:
                         result['first_page_text'] = text
                     else:
                         result['first_page_text'] += f"\n--- Page {page_num} ---\n{text}"
-                    if verbose:
-                        print(f"   📋 Page {page_num}: Captured for identifier extraction and table detection")
                 
-                # Extract images from "Image Data Sheet" pages
                 if image_keyword in text_lower:
                     page_images = _extract_images_from_page(page, page_num, verbose)
                     if page_images:
                         image_sketches.extend(page_images)
                 
-                is_bom_page = any(keyword in text_lower for keyword in bom_keywords)
-                is_measurement_page = any(keyword in text_lower for keyword in measurement_keywords)
+                text_lines = text.split('\n')
+                first_two_lines = '\n'.join(text_lines[:2]).lower() if len(text_lines) >= 2 else text_lower
+                
+                is_bom_page = any(keyword in first_two_lines for keyword in bom_keywords)
+                is_measurement_page = any(keyword in first_two_lines for keyword in measurement_keywords)
                 
                 if not is_bom_page and not is_measurement_page:
                     continue
@@ -618,11 +547,6 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
                 tables = page.extract_tables()
                 if not tables:
                     continue
-                
-                if verbose:
-                    print(f"   Found {len(tables)} tables on page {page_num}")
-                
-                page_has_valid_tables = False
                 
                 for i, table in enumerate(tables):
                     if not table or len(table) == 0:
@@ -642,15 +566,9 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
                     
                     if is_bom_page:
                         bom_tables.append(table_info)
-                        page_has_valid_tables = True
-                        if verbose:
-                            print(f"     📋 BOM table {i+1} extracted from page {page_num} ({len(cleaned_table)} rows)")
                     
                     if is_measurement_page:
                         measurement_tables.append(table_info)
-                        page_has_valid_tables = True
-                        if verbose:
-                            print(f"     📏 Measurement table {i+1} extracted from page {page_num} ({len(cleaned_table)} rows)")
                 
         
         result['fields'] = extract_fields_from_text(result['first_page_text'])
@@ -661,11 +579,9 @@ def extract_from_pdf(pdf_path: str, verbose: bool = False) -> Optional[Dict]:
         result['bom_tables'] = _merge_similar_tables(bom_tables, "BOM", verbose)
         result['measurement_tables'] = _merge_similar_tables(measurement_tables, "Measurement", verbose)
         
-        # Debug BOM tables if verbose
         if verbose:
             debug_bom_tables(result['bom_tables'])
         
-        # Extract BOM-specific fields (Composition, Material Finishes, Yarn Gauge)
         _extract_bom_fields(result['fields'], result['bom_tables'], verbose)
         result['image_sketches'] = image_sketches
         result['text_length'] = len(result['full_text'])
@@ -691,18 +607,13 @@ def _clean_table(table: List[List]) -> List[List]:
     for row in table:
         if row and any(cell and str(cell).strip() for cell in row):
             cleaned_row = [str(cell).strip() if cell is not None else "" for cell in row]
-            
-            # Skip pagination/navigation rows
             if not _is_pagination_row(cleaned_row):
                 cleaned.append(cleaned_row)
     
     if not cleaned:
         return []
     
-    # Check if we have proper headers and fix if needed
     cleaned = _detect_and_fix_headers(cleaned)
-    
-    # Remove blank columns
     cleaned = _remove_blank_columns(cleaned)
     
     return cleaned
@@ -713,7 +624,6 @@ def _remove_blank_columns(table: List[List]) -> List[List]:
     if not table or not table[0]:
         return table
     
-    # Find columns that are completely blank
     num_columns = len(table[0])
     blank_columns = []
     
@@ -722,18 +632,16 @@ def _remove_blank_columns(table: List[List]) -> List[List]:
         for row in table:
             if col_idx < len(row):
                 cell_value = str(row[col_idx]).strip()
-                if cell_value:  # If any cell in this column has content
+                if cell_value:
                     is_blank = False
                     break
         
         if is_blank:
             blank_columns.append(col_idx)
     
-    # If no blank columns, return original table
     if not blank_columns:
         return table
     
-    # Remove blank columns
     cleaned_table = []
     for row in table:
         cleaned_row = []
@@ -750,13 +658,11 @@ def _remove_blank_columns(table: List[List]) -> List[List]:
 
 def _is_pagination_row(row: List[str]) -> bool:
     """Check if row contains pagination or navigation information."""
-    # Join all cells in the row to check for pagination patterns
     row_text = ' '.join(str(cell).strip() for cell in row if cell).lower()
     
     if not row_text:
         return False
     
-    # Common pagination patterns
     pagination_patterns = [
         r'displaying\s+\d+\s*[-–]\s*\d+\s+of\s+\d+\s+results?',
         r'showing\s+\d+\s*[-–]\s*\d+\s+of\s+\d+',
@@ -771,20 +677,16 @@ def _is_pagination_row(row: List[str]) -> bool:
         r'showing\s+(?:all\s+)?\d+\s+(?:items?|results?|records?)'
     ]
     
-    # Check if row matches any pagination pattern
     for pattern in pagination_patterns:
         if re.search(pattern, row_text):
             return True
     
-    # Check if row is mostly numbers with navigation words
     if any(nav_word in row_text for nav_word in ['displaying', 'showing', 'results', 'total', 'page']):
-        # Count numbers vs text
         numbers = re.findall(r'\d+', row_text)
         words = row_text.split()
-        if len(numbers) >= 2 and len(words) <= 8:  # Likely pagination if few words but multiple numbers
+        if len(numbers) >= 2 and len(words) <= 8:
             return True
     
-    # Check for standalone navigation text
     navigation_phrases = [
         'first', 'previous', 'next', 'last', 'show more', 'load more',
         'view all', 'see more', 'continue', '...', 'more results'
@@ -793,7 +695,6 @@ def _is_pagination_row(row: List[str]) -> bool:
     if row_text.strip() in navigation_phrases:
         return True
     
-    # Check if row contains only page numbers or navigation symbols
     if re.match(r'^[\d\s\-–<>«»‹›\[\]().,|]+$', row_text):
         return True
     
@@ -831,19 +732,17 @@ def _are_valid_headers(headers: List[str], data_rows: List[List]) -> bool:
     if not headers or not data_rows:
         return False
     
-    # Headers should be mostly text and not look like data
     header_scores = []
     
     for i, header in enumerate(headers):
         header = str(header).strip().lower()
         
-        if not header:  # Empty header
+        if not header:
             header_scores.append(0)
             continue
         
         score = 0
         
-        # Good indicators for headers
         if any(keyword in header for keyword in [
             'name', 'description', 'qty', 'quantity', 'code', 'style', 'color',
             'size', 'material', 'fabric', 'component', 'measure', 'tolerance',
@@ -851,34 +750,29 @@ def _are_valid_headers(headers: List[str], data_rows: List[List]) -> bool:
         ]):
             score += 3
         
-        # Headers often have common words
         if any(word in header for word in [
             'no', 'num', 'id', 'ref', 'spec', 'min', 'max', 'total', 'unit',
             'price', 'cost', 'date', 'status', 'location', 'page'
         ]):
             score += 2
         
-        # Headers are usually short descriptive text
         if len(header.split()) <= 4 and header.isalpha():
             score += 1
         
-        # Check consistency with data in this column
         column_data = []
-        for row in data_rows[:5]:  # Check first 5 data rows
+        for row in data_rows[:5]:
             if i < len(row):
                 cell = str(row[i]).strip()
                 if cell:
                     column_data.append(cell)
         
         if column_data:
-            # If header looks different from data, it's likely a real header
             data_types = _analyze_column_data_types(column_data)
             if header not in column_data and not _looks_like_data(header, data_types):
                 score += 2
         
         header_scores.append(score)
     
-    # Consider it valid headers if average score is above threshold
     avg_score = sum(header_scores) / len(header_scores) if header_scores else 0
     return avg_score >= 1.5
 
@@ -898,21 +792,14 @@ def _analyze_column_data_types(data: List[str]) -> Dict:
         if not item:
             continue
         
-        # Check for numbers (including with units like "5 Yd", "0.375 in")
         if re.search(r'\d+\.?\d*\s*(yd|in|cm|mm|pc|piece|each|ea|lbs|kg|oz)', item.lower()):
             analysis['numeric'] += 1
         elif re.search(r'^\d+\.?\d*$', item):
             analysis['numeric'] += 1
-        
-        # Check for dates
         elif re.search(r'\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}', item):
             analysis['date'] += 1
-        
-        # Check for codes (mix of letters and numbers)
         elif re.search(r'^[A-Z]{1,3}\d+|^\d+[A-Z]+|\w*\d+\w*$', item.upper()):
             analysis['code'] += 1
-        
-        # Short vs long text
         elif len(item.split()) <= 3:
             analysis['short_text'] += 1
         else:
@@ -925,12 +812,11 @@ def _looks_like_data(text: str, data_types: Dict) -> bool:
     """Check if text looks like data rather than a header."""
     text = str(text).strip()
     
-    # If it matches common data patterns
-    if re.search(r'^\d+\.?\d*$', text):  # Pure number
+    if re.search(r'^\d+\.?\d*$', text):
         return True
-    if re.search(r'\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}', text):  # Date
+    if re.search(r'\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}', text):
         return True
-    if re.search(r'^[A-Z]{1,3}\d+|^\d+[A-Z]+', text.upper()):  # Code pattern
+    if re.search(r'^[A-Z]{1,3}\d+|^\d+[A-Z]+', text.upper()):
         return True
     
     return False
@@ -943,9 +829,7 @@ def _generate_headers(original_headers: List[str]) -> List[str]:
     for i, header in enumerate(original_headers):
         header = str(header).strip()
         
-        # Try to create meaningful names based on position and content
         if not header or header.lower() in ['', 'none', 'null']:
-            # Use position-based names
             if i == 0:
                 generated.append("Item")
             elif i == 1:
@@ -957,7 +841,6 @@ def _generate_headers(original_headers: List[str]) -> List[str]:
             else:
                 generated.append(f"Column_{i+1}")
         else:
-            # Clean up the existing header
             clean_header = re.sub(r'[^\w\s]', ' ', header)
             clean_header = ' '.join(clean_header.split())
             if clean_header:
@@ -969,148 +852,66 @@ def _generate_headers(original_headers: List[str]) -> List[str]:
 
 
 def _merge_similar_tables(tables: List[Dict], table_type: str, verbose: bool = False) -> List[Dict]:
-    """Merge tables with similar structure."""
+    """Merge tables with similar structure using two-phase approach: horizontal first, then vertical."""
     if not tables:
         return []
     
-    merged_groups = []
+    horizontal_groups = []
     
     for table in tables:
-        # Try to find a group to merge with
         merged = False
-        for group in merged_groups:
-            if _are_tables_similar(table, group['tables'][0]):
+        for group in horizontal_groups:
+            if _have_same_ids(table, group['tables'][0]):
                 group['tables'].append(table)
                 merged = True
-                if verbose:
-                    print(f"   🔗 Merged {table_type} table from page {table['page']}")
                 break
         
         if not merged:
-            # Create new group
-            merged_groups.append({
+            horizontal_groups.append({
                 'type': table_type,
                 'tables': [table],
                 'merged_data': None
             })
-            if verbose:
-                print(f"   📊 New {table_type} group from page {table['page']}")
     
-    # Merge data within each group
-    for group in merged_groups:
+    for group in horizontal_groups:
         group['merged_data'] = _merge_table_data(group['tables'])
     
-    # For BOM tables, merge tables with identical first columns
-    if table_type == "BOM":
-        merged_groups = _merge_bom_tables_by_identifier(merged_groups, verbose)
+    vertical_groups = []
     
-    # Filter out groups with no valid data
+    for h_group in horizontal_groups:
+        merged = False
+        for v_group in vertical_groups:
+            if _can_merge_vertically(h_group, v_group):
+                v_group['tables'].extend(h_group['tables'])
+                if h_group['merged_data'] and len(h_group['merged_data']) > 1:
+                    v_group['merged_data'].extend(h_group['merged_data'][1:])
+                merged = True
+                break
+        
+        if not merged:
+            vertical_groups.append({
+                'type': table_type,
+                'tables': h_group['tables'],
+                'merged_data': h_group['merged_data']
+            })
+    
     valid_groups = []
-    for group in merged_groups:
-        if group['merged_data'] and len(group['merged_data']) > 1:  # Has headers + at least 1 data row
+    for group in vertical_groups:
+        if group['merged_data'] and len(group['merged_data']) > 1:
             valid_groups.append(group)
-        elif verbose:
-            print(f"   ⚠️ Skipping empty {table_type} group from pages {[t['page'] for t in group['tables']]}")
     
     return valid_groups
 
 
-def _merge_bom_tables_by_identifier(merged_groups: List[Dict], verbose: bool = False) -> List[Dict]:
-    """Merge BOM tables that have identical first columns (identifiers)."""
-    if len(merged_groups) <= 1:
-        return merged_groups
-    
-    # Group tables by their first column identifiers
-    identifier_groups = {}
-    
-    for group in merged_groups:
-        if not group['merged_data'] or len(group['merged_data']) < 2:
-            continue
-            
-        # Get all unique identifiers from first column
-        first_col_idx = 0
-        identifiers = set()
-        for row in group['merged_data'][1:]:  # Skip header row
-            if first_col_idx < len(row) and row[first_col_idx]:
-                identifiers.add(str(row[first_col_idx]).strip())
-        
-        # Use the most common identifier as the group key
-        if identifiers:
-            # Find the most frequent identifier
-            identifier_counts = {}
-            for row in group['merged_data'][1:]:
-                if first_col_idx < len(row) and row[first_col_idx]:
-                    id_val = str(row[first_col_idx]).strip()
-                    identifier_counts[id_val] = identifier_counts.get(id_val, 0) + 1
-            
-            if identifier_counts:
-                main_identifier = max(identifier_counts, key=identifier_counts.get)
-                
-                if main_identifier not in identifier_groups:
-                    identifier_groups[main_identifier] = []
-                identifier_groups[main_identifier].append(group)
-    
-    # Merge groups with the same identifier
-    final_groups = []
-    for identifier, groups in identifier_groups.items():
-        if len(groups) > 1:
-            # Merge multiple groups with same identifier
-            merged_group = _merge_groups_by_identifier(groups, identifier, verbose)
-            if merged_group:
-                final_groups.append(merged_group)
-        else:
-            # Single group, keep as is
-            final_groups.extend(groups)
-    
-    return final_groups
-
-
-def _merge_groups_by_identifier(groups: List[Dict], identifier: str, verbose: bool = False) -> Dict:
-    """Merge multiple groups that have the same identifier."""
-    if not groups:
-        return None
-    
-    if len(groups) == 1:
-        return groups[0]
-    
-    # Collect all tables from all groups
-    all_tables = []
-    for group in groups:
-        all_tables.extend(group['tables'])
-    
-    # Merge all data
-    merged_data = _merge_table_data(all_tables)
-    
-    if not merged_data or len(merged_data) < 2:
-        return groups[0]  # Return first group if merge fails
-    
-    # Create merged group
-    merged_group = {
-        'type': 'BOM',
-        'tables': all_tables,
-        'merged_data': merged_data
-    }
-    
-    if verbose:
-        group_pages = [t['page'] for t in all_tables]
-        print(f"   🔄 Merged {len(groups)} BOM groups with identifier '{identifier}' from pages {sorted(set(group_pages))}")
-    
-    return merged_group
-
-
-def _are_tables_similar(table1: Dict, table2: Dict, threshold: float = 0.7) -> bool:
-    """Check if two tables have similar structure and different IDs."""
-    if abs(table1['num_cols'] - table2['num_cols']) > 1:
+def _can_merge_vertically(group1: Dict, group2: Dict, threshold: float = 0.7) -> bool:
+    """Check if two groups can be merged vertically (similar columns, different IDs)."""
+    if not group1.get('merged_data') or not group2.get('merged_data'):
         return False
     
-    headers1 = [str(h).lower().strip() for h in table1['headers']]
-    headers2 = [str(h).lower().strip() for h in table2['headers']]
+    headers1 = [str(h).lower().strip() for h in group1['merged_data'][0]]
+    headers2 = [str(h).lower().strip() for h in group2['merged_data'][0]]
     
     if not headers1 or not headers2:
-        return False
-    
-    # Check if tables have the same IDs in first column (don't merge if they do)
-    if _have_same_ids(table1, table2):
         return False
     
     common_headers = set(headers1) & set(headers2)
@@ -1120,7 +921,12 @@ def _are_tables_similar(table1: Dict, table2: Dict, threshold: float = 0.7) -> b
         return False
     
     similarity = len(common_headers) / len(total_headers)
-    return similarity >= threshold
+    
+    if similarity >= threshold:
+        if group1['tables'] and group2['tables']:
+            return not _have_same_ids(group1['tables'][0], group2['tables'][0])
+    
+    return False
 
 
 def _have_same_ids(table1: Dict, table2: Dict) -> bool:
@@ -1128,18 +934,15 @@ def _have_same_ids(table1: Dict, table2: Dict) -> bool:
     data1 = table1.get('data', [])
     data2 = table2.get('data', [])
     
-    # Need at least 2 rows (header + data) to compare IDs
     if len(data1) < 2 or len(data2) < 2:
         return False
     
-    # Get data rows (skip headers)
-    rows1 = data1[1:] if len(data1) > 1 else []
-    rows2 = data2[1:] if len(data2) > 1 else []
+    rows1 = data1[1:]
+    rows2 = data2[1:]
     
     if not rows1 or not rows2:
         return False
     
-    # Extract IDs from first column
     ids1 = set()
     ids2 = set()
     
@@ -1155,15 +958,12 @@ def _have_same_ids(table1: Dict, table2: Dict) -> bool:
             if first_cell and first_cell.lower() not in ['', 'none', 'null', 'n/a']:
                 ids2.add(first_cell.lower())
     
-    # If no valid IDs found, don't consider them the same
     if not ids1 or not ids2:
         return False
     
-    # Check if they have any common IDs
     common_ids = ids1 & ids2
     total_ids = ids1 | ids2
     
-    # If more than 50% of IDs are common, consider them the same table
     if len(total_ids) > 0:
         overlap_ratio = len(common_ids) / len(total_ids)
         return overlap_ratio >= 0.5
@@ -1179,18 +979,16 @@ def _merge_table_data(tables: List[Dict]) -> List[List]:
     if len(tables) == 1:
         return tables[0]['data']
     
-    # Check if tables have identical first columns (identifiers)
     first_table = tables[0]
     first_col_identifiers = set()
-    for row in first_table['data'][1:]:  # Skip header
+    for row in first_table['data'][1:]:
         if row and len(row) > 0 and row[0]:
             first_col_identifiers.add(str(row[0]).strip())
     
-    # Check if other tables have the same identifiers
     all_have_same_identifiers = True
     for table in tables[1:]:
         table_identifiers = set()
-        for row in table['data'][1:]:  # Skip header
+        for row in table['data'][1:]:
             if row and len(row) > 0 and row[0]:
                 table_identifiers.add(str(row[0]).strip())
         
@@ -1199,10 +997,8 @@ def _merge_table_data(tables: List[Dict]) -> List[List]:
             break
     
     if all_have_same_identifiers:
-        # Merge tables with identical identifiers by combining fields
         return _merge_tables_by_identifier(tables)
     else:
-        # Standard merge - just combine all data
         merged_data = [first_table['headers']]
         for table in tables:
             data_rows = table['data'][1:] if len(table['data']) > 1 else []
@@ -1215,24 +1011,23 @@ def _merge_tables_by_identifier(tables: List[Dict]) -> List[List]:
     if not tables:
         return []
     
-    # Create a mapping of identifier -> combined row data
     identifier_rows = {}
-    all_headers = set()
+    identifier_order = []
+    all_headers = []
+    header_set = set()
     
-    # Collect all unique headers
     for table in tables:
         for header in table['headers']:
             if header and str(header).strip():
-                all_headers.add(str(header).strip())
+                clean_header = str(header).strip()
+                if clean_header not in header_set:
+                    all_headers.append(clean_header)
+                    header_set.add(clean_header)
     
-    # Convert to list and sort for consistent ordering
-    all_headers = sorted(list(all_headers))
-    
-    # Process each table
     for table in tables:
         headers = [str(h).strip() for h in table['headers']]
         
-        for row in table['data'][1:]:  # Skip header row
+        for row in table['data'][1:]:
             if not row or len(row) == 0 or not row[0]:
                 continue
                 
@@ -1240,19 +1035,17 @@ def _merge_tables_by_identifier(tables: List[Dict]) -> List[List]:
             
             if identifier not in identifier_rows:
                 identifier_rows[identifier] = {}
+                identifier_order.append(identifier)
             
-            # Map each field to its value
             for i, header in enumerate(headers):
                 if i < len(row) and row[i]:
                     clean_header = str(header).strip()
                     if clean_header:
                         identifier_rows[identifier][clean_header] = str(row[i]).strip()
     
-    # Create merged data
-    merged_data = [all_headers]  # Header row
+    merged_data = [all_headers]
     
-    # Create data rows
-    for identifier in sorted(identifier_rows.keys()):
+    for identifier in identifier_order:
         row_data = []
         for header in all_headers:
             value = identifier_rows[identifier].get(header, "")
